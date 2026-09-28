@@ -36,6 +36,10 @@ public protocol ClientProcess: Sendable {
     func resize(_ size: Terminal.Size) async throws
     /// Send a signal to the process `id`.
     /// Kill does not wait for the process to exit, it only delivers the signal.
+    /// `signal` is a host (macOS) signal number, such as `SIGTERM`. It is sent by
+    /// name so the guest receives the equivalent Linux signal. Numbers with no
+    /// macOS name (e.g. Linux real-time signals) are sent unchanged and are
+    /// interpreted as Linux signal numbers.
     func kill(_ signal: Int32) async throws
     ///  Wait for the process `id` to complete and return its exit code.
     /// This method blocks until the process exits and the code is obtained.
@@ -80,9 +84,20 @@ struct ClientProcessImpl: ClientProcess, Sendable {
         let request = XPCMessage(route: .containerKill)
         request.set(key: .id, value: containerId)
         request.set(key: .processIdentifier, value: id)
-        request.set(key: .signal, value: Int64(signal))
+        request.set(key: .signal, value: Self.signalName(signal))
 
         try await xpcClient.send(request)
+    }
+
+    /// Returns the name of a host signal number (e.g. `SIGUSR1` -> "USR1").
+    ///
+    /// The server parses signals using Linux numbering, and some numbers differ
+    /// between macOS and Linux, so the signal must be sent by name rather than
+    /// by number. A number without a name (e.g. a Linux real-time signal) can
+    /// only mean the Linux signal and is sent as-is, matching how
+    /// `container kill --signal <number>` treats numbers.
+    static func signalName(_ signal: Int32) -> String {
+        Signal.platformName(signal) ?? "\(signal)"
     }
 
     /// Resize the processes PTY if it has one.
